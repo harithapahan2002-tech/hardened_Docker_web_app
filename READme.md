@@ -1,5 +1,7 @@
 
 🛡️ Hardened Web Stack with Ansible & Docker
+
+
 A production-ready, security-hardened deployment of a PHP-FPM, Nginx, and MariaDB stack. 
 
 This project demonstrates DevSecOps principles, including automated infrastructure provisioning, kernel-level capability stripping, and immutable container design.
