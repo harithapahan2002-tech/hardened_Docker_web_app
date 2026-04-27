@@ -1,0 +1,313 @@
+# Check versions
+docker --version          # Docker 24.0+
+docker compose version    # Compose 2.23+
+ansible --version         # Ansible 2.15+
+ssh -V                    # OpenSSH 8.0+
+git --version             # Git 2.30+ (will be installed in autoamtion)
+
+
+--------------------------tool and component installation (it is a must to have the docker compose correct version instead of docker-compose,docker.io or snap docker-----------------------
+
+steps to install Docker Compose, Ansible, and trivy:
+1. Update System
+bashsudo apt update && sudo apt upgrade -y
+
+----------Install Docker Compose-----------
+
+# Remove snap docker (if u have)
+sudo snap remove docker
+
+# Install official Docker
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg lsb-release
+
+# Add Docker's official GPG key
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+# Set up repository
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# Add your user to docker group
+sudo usermod -aG docker $USER
+
+#enable docker
+sudo systemctl enable docker (if it fails just restart the system and continue to next step)
+
+# Log out and log back in, then test
+docker --version
+docker compose version
+
+
+
+-------Install Ansible----------
+sudo apt install software-properties-common -y
+sudo add-apt-repository --yes --update ppa:ansible/ansible
+sudo apt install ansible -y
+ansible --version
+
+---------Install Trivy (Vulnerability Scanner)------
+# Add Trivy repository
+sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+
+# Install Trivy
+sudo apt-get update
+sudo apt-get install trivy -y
+trivy --version
+
+5. Verify Installations
+
+# Check all installations
+
+docker compose version
+ansible --version
+trivy --version
+
+Quick Test Commands
+
+Test Docker Compose:
+docker compose version
+
+Test Ansible:
+ansible localhost -m ping
+
+Test Trivy:
+trivy image alpine:latest
+----------------ansible------------------------------------
+please note that ansible won't run because the host connection to the droplet is based on SSH private key (no password access for extra security) only shared with my local pc and the droplet. 
+feel free to change and use the playbooks and cnf files if u have ur own droplet and SSH key.
+
+1. Login to DigitalOcean
+2. Create → Droplets
+3. Choose region: London (LON1) or nearest to you
+4. Choose image: Ubuntu 24.04 (LTS) x64
+5. Choose size: Basic - $12/month (recommended)(1 vCPU, 2GB RAM)
+6. Add SSH key: Paste your public key
+7. Enable monitoring: YES
+8. Hostname: suggestion-app-prod
+9. Create Droplet
+10. Note the IP address 
+
+# Execute complete deployment
+ansible-playbook playbooks/00-deploy-all.yml (after updating ur droplet IP)
+ 
+---------------------------------deployment--------------------------------------------------------------------------
+# Deployment includes:
+# ✓ Docker installation
+# ✓ Application deployment
+# ✓ Firewall configuration (UFW + fail2ban)
+# ✓ Security vulnerability scanning (Trivy)
+
+# Estimated time: 25-35 minutes
+System Requirements
+Local Development Machine:
+
+OS: Windows 10+, macOS 10.14+, or Linux (Ubuntu 20.04+)
+RAM: 8GB minimum, 16GB recommended
+Disk: 10GB free space
+CPU: 2+ cores recommended
+
+Production Server (DigitalOcean):
+
+Droplet: Basic plan ($12/month)
+Specs: 1 vCPU, 2GB RAM, 50GB SSD
+OS: Ubuntu 24.04 LTS
+Network: Public IPv4 address
+
+
+
+# Build all containers
+docker compose build (use --no-cache for speeding up and to save up on memory)
+
+# Expected output:
+# [+] Building nginx (2.5s)
+# [+] Building webserver (45.3s)
+# [+] Building database (12.1s)
+
+# Start all containers in background
+docker compose up -d
+
+# Wait for health checks (30 seconds)
+sleep 30
+
+# Verify containers are healthy
+docker compose ps
+
+# Expected output:
+# NAME                      STATUS
+# suggestion_database       Up (healthy)
+# suggestion_nginx          Up (healthy)
+# suggestion_webserver      Up (healthy)
+
+
+
+# Stop containers (preserves data)
+docker compose down
+
+# Stop and remove volumes (deletes data)
+docker compose down -v
+
+------------------------------helpful logging commands----------------------------
+
+# Check non-root execution
+docker compose exec webserver whoami
+# Output: appuser
+
+# Check capabilities
+docker compose exec nginx cat /proc/1/status | grep Cap
+# Output: Shows dropped capabilities
+
+# Check resource limits
+docker stats --no-stream
+# Output: Shows CPU/Memory limits in effect
+
+# Real-time logs (all containers)
+docker compose logs -f
+
+# Last 100 lines (specific container)
+docker compose logs --tail=100 webserver
+
+# Filter by time
+docker compose logs --since=1h nginx
+
+# Search logs
+docker compose logs nginx | grep ERROR
+
+
+-------------------------backup------------------------------------------------
+# Create backup
+docker compose exec database mysqldump \
+  -u root -p${MYSQL_ROOT_PASSWORD} \
+  suggestion_db > backup_$(date +%Y%m%d).sql
+
+# Restore from backup
+docker compose exec -T database mysql \
+  -u root -p${MYSQL_ROOT_PASSWORD} \
+  suggestion_db < backup_20251208.sql
+
+# Backup everything
+tar -czf suggestion-app-backup-$(date +%Y%m%d).tar.gz \
+  /root/suggestion-app
+
+# Restore
+tar -xzf suggestion-app-backup-20251208.tar.gz -C /root/
+
+---------------------------troubleshooting------------------------------
+
+# Check logs for errors
+docker compose logs webserver
+
+# Check container status
+docker compose ps
+
+# Inspect container
+docker inspect suggestion_webserver
+
+# 1. Port already in use
+sudo lsof -i :80  # Check what's using port 80
+sudo systemctl stop apache2  # Stop conflicting service
+
+# 2. Database not ready
+docker compose restart webserver  # Retry after DB starts
+
+# 3. Configuration error
+docker compose config  # Validate docker-compose.yml syntax
+
+---------------Application Not Accessible----------------------
+
+Symptom: Browser shows "Connection refused" or "Unable to connect"
+Diagnosis:
+# 1. Check if nginx is running
+docker compose ps nginx
+
+# 2. Check if port is open
+sudo ufw status | grep 80
+
+# 3. Test locally on server
+curl http://localhost
+
+# 4. Check from outside
+curl http://YOUR_DROPLET_IP
+
+----Common Fixes:
+# Open firewall port
+sudo ufw allow 80/tcp
+
+# Restart nginx
+docker compose restart nginx
+
+# Check nginx configuration
+docker compose exec nginx nginx -t
+
+
+------------Database Connection Errors----------------
+Symptom: "Connection refused" or "Access denied"
+Diagnosis:
+# 1. Check database is running
+docker compose ps database
+
+# 2. Check database logs
+docker compose logs database | grep ERROR
+
+# 3. Test connection from webserver
+docker compose exec webserver mysql -h database -u app_user 
+
+Common Fixes:
+# 1. Verify .env file exists
+cat /root/suggestion-app/.env
+
+# 2. Recreate database
+docker compose down
+docker volume rm suggestion-app_db_data
+docker compose up -d
+
+# 3. Check credentials match
+docker compose exec database mysql -u root -p -e "SELECT user,host FROM mysql.user;"
+
+
+-------------Login Not Working----------------
+Symptom: Login succeeds but redirects back to login page
+Solution:
+# Session cookies not working (HTTP vs HTTPS mismatch)
+# Edit auth.php
+nano /root/suggestion-app/webserver/public/auth.php
+
+# For HTTP: set session.cookie_secure to 0
+# For HTTPS: set session.cookie_secure to 1
+
+# Restart webserver
+docker compose restart webserver
+
+--------------High Resource Usage-----------------
+Symptom: Server slow or unresponsive
+Diagnosis:
+# Check resource usage
+docker stats
+
+# Check system resources
+htop  # or 'top'
+
+# Check disk space
+df -h
+
+Common Fixes:
+# 1. Clean up Docker
+docker system prune -a
+
+# 2. Restart containers
+docker compose restart
+
+# 3. Check logs for memory leaks
+docker compose logs --tail=100
+
+
+
+

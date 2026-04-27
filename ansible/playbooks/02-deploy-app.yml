@@ -1,0 +1,114 @@
+---
+- name: Deploy Application to DigitalOcean
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    local_app_path: "{{ playbook_dir }}/../../"
+    app_directory: /root/suggestion-app
+    
+  tasks:
+    - name: Display deployment info
+      debug:
+        msg:
+          - "Deploying {{ app_name }} to {{ app_directory }}"
+          - "Environment: {{ deployment_env }}"
+
+    - name: Create application directory
+      file:
+        path: "{{ app_directory }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy application files
+      synchronize:
+        src: "{{ local_app_path }}"
+        dest: "{{ app_directory }}/"
+        delete: false
+        recursive: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=.env"
+          - "--exclude=ansible"
+          - "--exclude=ansible.old"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=.vscode"
+
+    - name: Check if .env exists
+      stat:
+        path: "{{ app_directory }}/.env"
+      register: env_file
+
+    - name: Generate secure passwords
+      set_fact:
+        db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+        root_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+        session_secret: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+      when: not env_file.stat.exists
+
+    - name: Create .env file
+      template:
+        src: "{{ playbook_dir }}/../templates/env.j2"
+        dest: "{{ app_directory }}/.env"
+        mode: '0600'
+      when: not env_file.stat.exists
+
+    - name: Display credentials (SAVE THESE!)
+      debug:
+        msg:
+          - "=========================================="
+          - "⚠️  IMPORTANT: Save These Credentials!"
+          - "=========================================="
+          - "Database Password: {{ db_password }}"
+          - "Root Password: {{ root_password }}"
+          - "Session Secret: {{ session_secret }}"
+          - "=========================================="
+          - "These are stored in: {{ app_directory }}/.env"
+          - "=========================================="
+      when: not env_file.stat.exists
+
+    - name: Build Docker images
+      command: docker compose build
+      args:
+        chdir: "{{ app_directory }}"
+      register: build_output
+
+    - name: Start Docker containers
+      command: docker compose up -d
+      args:
+        chdir: "{{ app_directory }}"
+
+    - name: Wait for containers to start
+      pause:
+        seconds: 30
+        prompt: "Waiting for containers to initialize..."
+
+    - name: Check container status
+      command: docker compose ps
+      args:
+        chdir: "{{ app_directory }}"
+      register: ps_output
+      changed_when: false
+
+    - name: Display container status
+      debug:
+        msg: "{{ ps_output.stdout_lines }}"
+
+    - name: Verify application is responding
+      uri:
+        url: "http://{{ ansible_host }}/"
+        method: GET
+        status_code: 200
+      register: health_check
+      retries: 5
+      delay: 5
+      until: health_check.status == 200
+      ignore_errors: true
+
+    - name: Display deployment result
+      debug:
+        msg:
+          - "✅ Application deployed successfully!"
+          - "Access at: http://{{ ansible_host }}"

@@ -1,0 +1,37 @@
+---
+# ===== Global Variables =====
+
+# Application
+app_name: suggestion-app
+
+# Docker packages
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# System packages
+system_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - wget
+
+# Firewall
+firewall_allowed_ports:
+  - 22
+  - 80
+  - 443
+  - 19999
+
+# Security
+generate_new_passwords: true
+remove_demo_users: false
+
+# Trivy scanning
+trivy_scan_dir: /var/log/trivy-scans
+trivy_severity: "HIGH,CRITICAL"

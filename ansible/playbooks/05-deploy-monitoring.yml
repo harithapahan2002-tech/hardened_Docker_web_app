@@ -1,0 +1,47 @@
+---
+- name: Deploy Netdata monitoring
+  hosts: all # or whatever host group you're using
+  become: yes
+  
+  tasks:
+    - name: Create Netdata volumes
+      docker_volume:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - netdata_config
+        - netdata_lib
+        - netdata_cache
+
+    - name: Deploy Netdata container
+      docker_container:
+        name: netdata
+        image: netdata/netdata:latest
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        pid_mode: host
+        capabilities:
+          - SYS_PTRACE
+          - SYS_ADMIN
+        security_opts:
+          - apparmor:unconfined
+        volumes:
+          - /etc/passwd:/host/etc/passwd:ro
+          - /etc/group:/host/etc/group:ro
+          - /proc:/host/proc:ro
+          - /sys:/host/sys:ro
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - netdata_config:/etc/netdata
+          - netdata_lib:/var/lib/netdata
+          - netdata_cache:/var/cache/netdata
+        env:
+          DOCKER_HOST: "/var/run/docker.sock"
+
+    - name: Allow Netdata port in UFW
+      ufw:
+        rule: allow
+        port: '19999'
+        proto: tcp
+        comment: 'Netdata monitoring dashboard'
+      when: ansible_facts.services['ufw'] is defined

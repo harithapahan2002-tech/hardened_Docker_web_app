@@ -1,0 +1,27 @@
+# Environment variables (contains secrets)
+.env
+
+# Docker volumes
+db_data/
+
+# SSL certificates (generate locally, don't commit)
+nginx/ssl/*.key
+nginx/ssl/*.crt
+nginx/ssl/*.pem
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*~

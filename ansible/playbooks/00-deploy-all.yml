@@ -1,0 +1,67 @@
+---
+- name: Complete DigitalOcean Deployment
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Display deployment information
+      debug:
+        msg:
+          - "=========================================="
+          - "Starting DigitalOcean Deployment"
+          - "=========================================="
+          - "Target Server: {{ ansible_host }}"
+          - "Environment: {{ deployment_env }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Application: {{ app_name }}"
+          - "Directory: {{ app_directory | default('/root/suggestion-app') }}"
+          - "=========================================="
+
+- name: Step 1 - Install Docker
+  import_playbook: 01-setup-docker.yml
+
+- name: Step 2 - Deploy Application
+  import_playbook: 02-deploy-app.yml
+
+- name: Step 3 - Configure Firewall
+  import_playbook: 03-configure-firewall.yml
+
+- name: Step 4 - Security Vulnerability Scan
+  import_playbook: 04-security-scan.yml
+
+- name: Step 5 - netdata montoring
+  import_playbook: 05-deploy-monitoring.yml
+
+- name: Final Summary
+  hosts: all
+  gather_facts: false
+  
+  vars:
+    app_directory: /root/suggestion-app
+    trivy_scan_dir: /var/log/trivy-scans
+    
+  tasks:
+    - name: Display deployment summary
+      debug:
+        msg:
+          - "=========================================="
+          - "✅ Deployment Complete!"
+          - "=========================================="
+          - ""
+          - "🌐 Application URL: http://{{ ansible_host }}"
+          - ""
+          - "📝 Register New User:"
+          - "   Format: 70XXXX09 (e.g., 70123409)"
+          - ""
+          - "🔐 SSH Access:"
+          - "   ssh root@{{ ansible_host }}"
+          - ""
+          - "🐳 Docker Commands:"
+          - "   cd {{ app_directory }}"
+          - "   docker compose ps"
+          - "   docker compose logs -f"
+          - ""
+          - "🔍 Security Scan Reports:"
+          - "   {{ trivy_scan_dir }}/summary.txt"
+          - ""
+          - "=========================================="

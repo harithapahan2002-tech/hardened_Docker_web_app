@@ -1,0 +1,112 @@
+---
+- name: Configure Firewall on DigitalOcean
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install UFW
+      apt:
+        name: ufw
+        state: present
+        update_cache: false
+
+    - name: Reset UFW
+      ufw:
+        state: reset
+      ignore_errors: true
+
+    - name: Set UFW default policies
+      ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: 'incoming', policy: 'deny' }
+        - { direction: 'outgoing', policy: 'allow' }
+
+    - name: Allow SSH (port 22)
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+        comment: 'SSH access'
+
+    - name: Allow HTTP (port 80)
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+        comment: 'HTTP web traffic'
+
+    - name: Allow HTTPS (port 443)
+      ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+        comment: 'HTTPS web traffic'
+
+    - name: allow netdata
+      ufw:
+        rule: allow
+        port: '19999'
+        proto: tcp
+        comment: 'Home-netdata'
+
+
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    - name: Check UFW status
+      command: ufw status verbose
+      register: ufw_status
+      changed_when: false
+
+    - name: Display firewall status
+      debug:
+        msg: "{{ ufw_status.stdout_lines }}"
+
+    - name: Install fail2ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Configure fail2ban for SSH
+      copy:
+        content: |
+          [sshd]
+          enabled = true
+          port = 22
+          filter = sshd
+          logpath = /var/log/auth.log
+          maxretry = 5
+          bantime = 3600
+          findtime = 600
+        dest: /etc/fail2ban/jail.d/sshd.conf
+        mode: '0644'
+      notify: Restart fail2ban
+
+    - name: Start fail2ban
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: true
+
+    - name: Display security summary
+      debug:
+        msg:
+          - "=========================================="
+          - "✅ Firewall configured!"
+          - "=========================================="
+          - "Allowed: SSH (22), HTTP (80), HTTPS (443)"
+          - "Blocked: All other ports"
+          - "Fail2ban: Active (SSH brute-force protection)"
+          - "=========================================="
+
+  handlers:
+    - name: Restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+...

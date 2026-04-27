@@ -1,0 +1,155 @@
+---
+- name: Security Vulnerability Scanning with Trivy
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    trivy_scan_dir: /var/log/trivy-scans
+    trivy_severity: "HIGH,CRITICAL"
+
+  tasks:
+    - name: Display scan information
+      debug:
+        msg:
+          - "=========================================="
+          - "Starting Trivy Security Scan"
+          - "=========================================="
+          - "Scanning for: {{ trivy_severity }}"
+          - "Report directory: {{ trivy_scan_dir }}"
+
+    - name: Install Trivy dependencies
+      apt:
+        name:
+          - wget
+          - apt-transport-https
+          - gnupg
+        state: present
+        update_cache: false
+
+    - name: Add Trivy GPG key
+      shell: |
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+      args:
+        creates: /usr/share/keyrings/trivy.gpg
+
+    - name: Get Ubuntu codename
+      shell: . /etc/os-release && echo "$VERSION_CODENAME"
+      register: ubuntu_codename
+      changed_when: false
+
+    - name: Add Trivy repository
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb {{ ubuntu_codename.stdout }} main"
+        state: present
+        filename: trivy
+
+    - name: Install Trivy
+      apt:
+        name: trivy
+        state: present
+        update_cache: true
+
+    - name: Verify Trivy installation
+      command: trivy --version
+      register: trivy_version
+      changed_when: false
+
+    - name: Display Trivy version
+      debug:
+        msg: "{{ trivy_version.stdout }}"
+
+    - name: Create scan report directory
+      file:
+        path: "{{ trivy_scan_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Get Docker images list
+      shell: docker images --format "{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }}" | grep -v "<none>"
+      register: docker_images
+      changed_when: false
+
+    - name: Display images to scan
+      debug:
+        msg: "Scanning {{ docker_images.stdout_lines | length }} images"
+
+    - name: Scan Docker images
+      shell: |
+        echo "Scanning: {{ item }}" >> {{ trivy_scan_dir }}/scan.log
+        trivy image --severity {{ trivy_severity }} --format table {{ item }} >> {{ trivy_scan_dir }}/{{ item | regex_replace('[/:]', '_') }}.txt 2>&1
+      loop: "{{ docker_images.stdout_lines }}"
+      register: scan_results
+      failed_when: false
+      changed_when: false
+
+    - name: Generate summary report
+      shell: |
+        echo "============================================" > {{ trivy_scan_dir }}/summary.txt
+        echo "Trivy Vulnerability Scan Summary" >> {{ trivy_scan_dir }}/summary.txt
+        echo "Scan Date: $(date)" >> {{ trivy_scan_dir }}/summary.txt
+        echo "Severity: {{ trivy_severity }}" >> {{ trivy_scan_dir }}/summary.txt
+        echo "============================================" >> {{ trivy_scan_dir }}/summary.txt
+        echo "" >> {{ trivy_scan_dir }}/summary.txt
+        
+        for file in {{ trivy_scan_dir }}/*.txt; do
+          if [ -f "$file" ] && [ "$(basename $file)" != "summary.txt" ]; then
+            echo "--- $(basename $file .txt) ---" >> {{ trivy_scan_dir }}/summary.txt
+            grep -A 3 "Total:" "$file" >> {{ trivy_scan_dir }}/summary.txt 2>/dev/null || echo "No critical/high vulnerabilities" >> {{ trivy_scan_dir }}/summary.txt
+            echo "" >> {{ trivy_scan_dir }}/summary.txt
+          fi
+        done
+
+    - name: Read summary
+      slurp:
+        src: "{{ trivy_scan_dir }}/summary.txt"
+      register: summary_content
+
+    - name: Display scan summary
+      debug:
+        msg: "{{ summary_content.content | b64decode }}"
+
+    - name: Count CRITICAL vulnerabilities
+      shell: grep -r "CRITICAL" {{ trivy_scan_dir }}/*.txt 2>/dev/null | wc -l
+      register: critical_count
+      changed_when: false
+      failed_when: false
+
+    - name: Count HIGH vulnerabilities
+      shell: grep -r "HIGH" {{ trivy_scan_dir }}/*.txt 2>/dev/null | wc -l
+      register: high_count
+      changed_when: false
+      failed_when: false
+
+    - name: Display vulnerability counts
+      debug:
+        msg:
+          - "=========================================="
+          - "Scan Complete!"
+          - "=========================================="
+          - "CRITICAL: {{ critical_count.stdout | default('0') }}"
+          - "HIGH: {{ high_count.stdout | default('0') }}"
+          - ""
+          - "Reports: {{ trivy_scan_dir }}/"
+          - "View: ssh root@{{ ansible_host }}"
+          - "      cat {{ trivy_scan_dir }}/summary.txt"
+          - "=========================================="
+
+    - name: Create manual scan script
+      copy:
+        content: |
+          #!/bin/bash
+          echo "Running Trivy vulnerability scan..."
+          cd {{ app_directory }}
+          for image in $(docker images --format "{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }}" | grep -v "<none>"); do
+            echo "Scanning: $image"
+            trivy image --severity {{ trivy_severity }} $image
+          done
+        dest: /usr/local/bin/scan-vulnerabilities.sh
+        mode: '0755'
+
+    - name: Security scan complete message
+      debug:
+        msg:
+          - "✅ Security scanning configured"
+          - "Manual scan: /usr/local/bin/scan-vulnerabilities.sh"
